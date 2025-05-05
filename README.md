@@ -2,7 +2,7 @@
 This application provides point-and-click / scroll-wheel control of frequency and span. 
 This application was designed for Windows for use with the [Elecraft P3](https://ftp.elecraft.com/P3/Manuals%20Downloads/E740152%20P3%20Owner%27s%20man%20Rev%20H1.pdf) with the [SVG add-on](https://ftp.elecraft.com/P3/Manuals%20Downloads/E740170%20P3%20SVGA%20Option%20Rev%20E.pdf) and a video capture device [like this one](https://a.co/d/1YxC9fZ).
 
-![image](https://github.com/user-attachments/assets/fd18076d-d2c3-4bf0-b7ea-f47cfe36f065)
+![K3Capture](https://github.com/user-attachments/assets/9b4ceef3-01d5-4f86-b39a-4f80dc9c85c9)
 
 This script was a co-development with ChatGPT. It can be compiled into an executable by:
 
