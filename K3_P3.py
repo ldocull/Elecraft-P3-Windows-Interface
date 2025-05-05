@@ -20,7 +20,7 @@ import os
 from serial.tools import list_ports
 from ttkthemes import ThemedTk
 
-MY_VERSION = "WR9R  V0.1"
+MY_VERSION = "WR9R  V0.2"
 MY_POLL_TIME = 500
 CONFIG_FILE = "config.json"
 
@@ -42,11 +42,15 @@ config = load_config()
 MY_VIDEO_SOURCE = config.get("video_source", 0)
 MY_K3_COMM_PORT = config.get("comm_port", "COM4")
 MY_COMM_RATE = config.get("comm_rate", "38400")
+STAY_ON_TOP = config.get("stay_on_top", False)
+W_WIDTH = 740
+W_HEIGHT = 580
 
 K3ser = serial.Serial(MY_K3_COMM_PORT, baudrate=int(MY_COMM_RATE), timeout=0.1)
 K3ser.rts = False
 K3ser.dtr = False
 K3ser.write(b"#SPN001000;")
+
 
 def extract_fa_string(k):
     match = re.search(r'FA0[^;]*;', k)
@@ -60,6 +64,12 @@ class VideoApp:
         self.root.configure(bg='#2e2e2e')
         self.root.protocol("WM_DELETE_WINDOW", self.exit_app)
         self.root.after(MY_POLL_TIME, self.periodic_task)
+        # Set window position and size
+        window_width = config.get("window_width", W_WIDTH)
+        window_height = config.get("window_height", W_HEIGHT)
+        window_x = config.get("window_x", 100)
+        window_y = config.get("window_y", 100)
+        self.root.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
 
         style = ttk.Style()
         style.theme_use('alt')
@@ -69,6 +79,11 @@ class VideoApp:
                 fieldbackground='#2e2e2e',  # input area background
                 background='#2e2e2e',       # arrow button background
                 foreground='#ffffff')       # text color
+
+        self.stay_on_top = tk.BooleanVar()
+        self.stay_on_top.set(STAY_ON_TOP)
+        ttk.Checkbutton(self.root, text="Stay on Top", variable=self.stay_on_top, command=self.toggle_on_top).grid(row=4, column=0)
+        self.root.attributes('-topmost', self.stay_on_top.get())
 
         self.cap = cv2.VideoCapture(MY_VIDEO_SOURCE)
         if not self.cap.isOpened():
@@ -113,6 +128,9 @@ class VideoApp:
 
         self.update_video()
 
+    def toggle_on_top(self):
+        self.root.attributes('-topmost', self.stay_on_top.get())
+
     def detect_video_sources(self, max_sources=5):
         available = []
         for i in range(max_sources):
@@ -134,6 +152,7 @@ class VideoApp:
         config['video_source'] = MY_VIDEO_SOURCE
         config['comm_port'] = MY_K3_COMM_PORT
         config['comm_rate'] = MY_COMM_RATE
+        config['stay_on_top'] = self.stay_on_top.get()
         save_config(config)
 
         self.cap.release()
@@ -225,8 +244,33 @@ class VideoApp:
             case _:
                 print(f"Unknown label: {label}")
 
+    def load_config():
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        return {
+            "video_source": 0,
+            "k3_port": "COM4",
+            "baud_rate": "38400",
+            "stay_on_top": False,
+            "window_x": 100,
+            "window_y": 100,
+            "window_width": W_WIDTH,
+            "window_height": W_HEIGHT
+        }
+
+    def save_config(config):
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f)
+
     def exit_app(self):
         print("Exiting...")
+        # Save window position and size
+        config['window_x'] = self.root.winfo_x()
+        config['window_y'] = self.root.winfo_y()
+        config['window_width'] = self.root.winfo_width()
+        config['window_height'] = self.root.winfo_height()
+        save_config(config)     
         self.cap.release()
         self.root.quit()
         self.root.destroy()
