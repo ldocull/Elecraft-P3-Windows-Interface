@@ -7,6 +7,7 @@
 ##    May 1, 2025
 ##    WR9R
 ##
+##    May 6 -- Added Marker and FVO controls
 
 import cv2
 import tkinter as tk
@@ -20,12 +21,13 @@ import os
 from serial.tools import list_ports
 from ttkthemes import ThemedTk
 
-MY_VERSION = "WR9R  V0.2"
+MY_VERSION = "WR9R  V0.3"
 MY_POLL_TIME = 500
 CONFIG_FILE = "config.json"
 
 frequency = 0
 Scale = 50000
+whichMarker = "N"
 
 # Load saved settings
 def load_config():
@@ -43,8 +45,8 @@ MY_VIDEO_SOURCE = config.get("video_source", 0)
 MY_K3_COMM_PORT = config.get("comm_port", "COM4")
 MY_COMM_RATE = config.get("comm_rate", "38400")
 STAY_ON_TOP = config.get("stay_on_top", False)
-W_WIDTH = 740
-W_HEIGHT = 580
+W_WIDTH = 750
+W_HEIGHT = 615
 
 K3ser = serial.Serial(MY_K3_COMM_PORT, baudrate=int(MY_COMM_RATE), timeout=0.1)
 K3ser.rts = False
@@ -59,7 +61,7 @@ def extract_fa_string(k):
 class VideoApp:
     def __init__(self, root):
         self.root = root
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
         self.root.title("Elecraft P3 - WR9R")
         self.root.configure(bg='#2e2e2e')
         self.root.protocol("WM_DELETE_WINDOW", self.exit_app)
@@ -118,13 +120,23 @@ class VideoApp:
         self.rate_dropdown = ttk.Combobox(self.root, values=rates, textvariable=self.comm_rate_var)
         self.rate_dropdown.grid(row=2, column=5)
 
-        ttk.Button(self.root, text="Save", command=self.save_settings).grid(row=2, column=6)
-
         ttk.Button(self.root, text="10K", command=lambda: self.button_action("10K")).grid(row=3, column=1)
         ttk.Button(self.root, text="50K", command=lambda: self.button_action("50K")).grid(row=3, column=2)
         ttk.Button(self.root, text="100K", command=lambda: self.button_action("100K")).grid(row=3, column=3)
         ttk.Button(self.root, text="200K", command=lambda: self.button_action("200K")).grid(row=3, column=4)
-        ttk.Button(self.root, text="Exit", command=self.exit_app).grid(row=3, column=6)
+
+        ttk.Button(self.root, text="MKR A", command=lambda: self.marker_action("MKR A")).grid(row=4, column=1)
+        ttk.Button(self.root, text="MKR B", command=lambda: self.marker_action("MKR B")).grid(row=4, column=2)
+        ttk.Button(self.root, text="QSY", command=lambda: self.marker_action("QSY")).grid(row=4, column=3)
+        ttk.Button(self.root, text="MKR OFF", command=lambda: self.marker_action("OFF")).grid(row=4, column=4)
+
+        ttk.Button(self.root, text="A/B", command=lambda: self.VFO_action("A/B")).grid(row=5, column=1)
+        ttk.Button(self.root, text="A>B", command=lambda: self.VFO_action("A>B")).grid(row=5, column=2)
+        ttk.Button(self.root, text="SPLIT", command=lambda: self.VFO_action("SPLIT")).grid(row=5, column=3)
+        ttk.Button(self.root, text="SUB", command=lambda: self.VFO_action("SUB")).grid(row=5, column=4)
+
+        ttk.Button(self.root, text="Save", command=self.save_settings).grid(row=3, column=6)
+        ttk.Button(self.root, text="Exit", command=self.exit_app).grid(row=4, column=6)
 
         self.update_video()
 
@@ -199,11 +211,17 @@ class VideoApp:
         self.status_label.config(text=f"Freq: {newFreq:08d}")
 
     def mouse_click(self, event):
-        global frequency, Scale
+        global frequency, Scale, whichMarker
         pos = (event.x - 320)
         offset = int((Scale/320) * pos)
         newFreq = frequency + offset
-        formatted = f"FA000{newFreq:08d};"
+        match whichMarker:      ## move marker or VFOA
+            case "A":
+                formatted = f"#MFA 000{newFreq:08d};"
+            case "B":
+                formatted = f"#MFB 000{newFreq:08d};"
+            case _:
+                formatted = f"FA000{newFreq:08d};"
         print(formatted)
         byte_data = bytearray(formatted.encode("utf-8"))
         K3ser.write(byte_data)
@@ -244,6 +262,46 @@ class VideoApp:
             case _:
                 print(f"Unknown label: {label}")
 
+    def marker_action(self, label):
+        global whichMarker
+        print(f"Button pressed: {label}")
+        match label:
+            case "MKR A":
+                print("Marker A action triggered")
+                K3ser.write(b"#MKA1;#MKB0;")
+                whichMarker = "A"
+            case "MKR B":
+                print("Marker B action triggered")
+                K3ser.write(b"#MKA0;#MKB1;")
+                whichMarker = "B"
+            case "QSY":
+                print("QSY action triggered")
+                K3ser.write(b"#QSY1;")             
+            case "OFF":
+                print("Markers OFF action triggered")
+                K3ser.write(b"#MKA0;#MKB0;#QSY0;")
+                whichMarker = "N"
+            case _:
+                print(f"Unknown marker button: {label}")
+
+    def VFO_action(self, label):
+        print(f"Button pressed: {label}")
+        match label:
+            case "A/B":
+                print("VFO A/B action triggered")
+                K3ser.write(b"SWT11;")
+            case "SUB":
+                print("VFO REV action triggered")
+                K3ser.write(b"SWT48;")
+            case "A>B":
+                print("VFO A=B action triggered")
+                K3ser.write(b"SWT13;")
+            case "SPLIT":
+                print("SPLIT action triggered")
+                K3ser.write(b"SWH13;")
+            case _:
+                print(f"Unknown marker button: {label}")
+                
     def load_config():
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r') as f:
