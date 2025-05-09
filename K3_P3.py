@@ -76,16 +76,32 @@ class VideoApp:
         style = ttk.Style()
         style.theme_use('alt')
         style.configure('TButton', foreground='white', background='#444444')
+        style.configure('Dark.TCheckbutton',
+                foreground='white',
+                background='#444444',
+                focuscolor=style.configure(".")["background"])  # optional to match look
+        
         style.configure('TLabel', foreground='white', background='#2e2e2e')
         style.configure('TCombobox',
                 fieldbackground='#2e2e2e',  # input area background
                 background='#2e2e2e',       # arrow button background
                 foreground='#ffffff')       # text color
 
-        self.stay_on_top = tk.BooleanVar()
-        self.stay_on_top.set(STAY_ON_TOP)
-        ttk.Checkbutton(self.root, text="Stay on Top", variable=self.stay_on_top, command=self.toggle_on_top).grid(row=4, column=0)
-        self.root.attributes('-topmost', self.stay_on_top.get())
+        self.stay_on_top_var = tk.BooleanVar(value=STAY_ON_TOP)
+        self.stay_on_top_cb = tk.Checkbutton(
+            self.root,
+            text="Stay on Top",
+            variable=self.stay_on_top_var,
+            command=self.toggle_stay_on_top,
+            bg="#444444",
+            fg="white",
+            selectcolor="#444444",
+            activebackground="#555555"
+        )
+
+        self.stay_on_top_cb.grid(row=5, column=0, columnspan=1)
+
+        self.root.attributes('-topmost', self.stay_on_top_var.get())
 
         self.cap = cv2.VideoCapture(MY_VIDEO_SOURCE)
         if not self.cap.isOpened():
@@ -120,10 +136,11 @@ class VideoApp:
         self.rate_dropdown = ttk.Combobox(self.root, values=rates, textvariable=self.comm_rate_var)
         self.rate_dropdown.grid(row=2, column=5)
 
-        ttk.Button(self.root, text="10K", command=lambda: self.button_action("10K")).grid(row=3, column=1)
-        ttk.Button(self.root, text="50K", command=lambda: self.button_action("50K")).grid(row=3, column=2)
-        ttk.Button(self.root, text="100K", command=lambda: self.button_action("100K")).grid(row=3, column=3)
-        ttk.Button(self.root, text="200K", command=lambda: self.button_action("200K")).grid(row=3, column=4)
+        ttk.Button(self.root, text="2K", command=lambda: self.button_action("2K")).grid(row=3, column=1)
+        ttk.Button(self.root, text="10K", command=lambda: self.button_action("10K")).grid(row=3, column=2)
+        ttk.Button(self.root, text="50K", command=lambda: self.button_action("50K")).grid(row=3, column=3)
+        ttk.Button(self.root, text="100K", command=lambda: self.button_action("100K")).grid(row=3, column=4)
+        ttk.Button(self.root, text="200K", command=lambda: self.button_action("200K")).grid(row=3, column=5)
 
         ttk.Button(self.root, text="MKR A", command=lambda: self.marker_action("MKR A")).grid(row=4, column=1)
         ttk.Button(self.root, text="MKR B", command=lambda: self.marker_action("MKR B")).grid(row=4, column=2)
@@ -135,13 +152,18 @@ class VideoApp:
         ttk.Button(self.root, text="SPLIT", command=lambda: self.VFO_action("SPLIT")).grid(row=5, column=3)
         ttk.Button(self.root, text="SUB", command=lambda: self.VFO_action("SUB")).grid(row=5, column=4)
 
-        ttk.Button(self.root, text="Save", command=self.save_settings).grid(row=3, column=6)
-        ttk.Button(self.root, text="Exit", command=self.exit_app).grid(row=4, column=6)
+        ttk.Button(self.root, text="Save", command=self.save_settings).grid(row=4, column=6)
+        ttk.Button(self.root, text="Exit", command=self.exit_app).grid(row=5, column=6)
 
         self.update_video()
 
-    def toggle_on_top(self):
-        self.root.attributes('-topmost', self.stay_on_top.get())
+    def toggle_stay_on_top(self):
+        is_on_top = self.stay_on_top_var.get()
+        self.root.attributes('-topmost', is_on_top)
+        config['stay_on_top'] = is_on_top
+        global STAY_ON_TOP
+        STAY_ON_TOP = is_on_top  # keep in sync
+        save_config(config)
 
     def detect_video_sources(self, max_sources=5):
         available = []
@@ -164,7 +186,7 @@ class VideoApp:
         config['video_source'] = MY_VIDEO_SOURCE
         config['comm_port'] = MY_K3_COMM_PORT
         config['comm_rate'] = MY_COMM_RATE
-        config['stay_on_top'] = self.stay_on_top.get()
+        config['stay_on_top'] = self.stay_on_top_var.get()
         save_config(config)
 
         self.cap.release()
@@ -247,6 +269,9 @@ class VideoApp:
         global Scale
         print(f"Button pressed: {label}")
         match label:
+            case "2K":
+                Scale = 1000
+                K3ser.write(b"#SPN000020;")
             case "10K":
                 Scale = 5000
                 K3ser.write(b"#SPN000100;")
