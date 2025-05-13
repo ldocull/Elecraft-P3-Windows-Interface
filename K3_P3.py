@@ -9,6 +9,8 @@
 ##
 ##    May 6 -- Added Marker and FVO controls
 ##    May 12 -- Added Band amd Mode Drop downs
+##    May 13 -- Added window scalability
+##
 
 import cv2
 import tkinter as tk
@@ -22,7 +24,7 @@ import os
 from serial.tools import list_ports
 from ttkthemes import ThemedTk
 
-MY_VERSION = "WR9R V0.4"
+MY_VERSION = "WR9R V1.0"
 MY_POLL_TIME = 500
 CONFIG_FILE = "config.json"
 
@@ -92,6 +94,7 @@ class VideoApp:
         window_y = config.get("window_y", 100)
         self.root.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
 
+
         style = ttk.Style()
         style.theme_use('clam')  ## 'alt'
         style.configure('TButton', foreground='white', background='#444444')
@@ -127,7 +130,8 @@ class VideoApp:
             raise RuntimeError("Could not start video capture.")
 
         self.video_label = tk.Label(self.root, bg='#2e2e2e')
-        self.video_label.grid(row=0, column=0, columnspan=7)
+#        self.video_label.grid(row=0, column=0, columnspan=7)
+        self.video_label.grid(row=0, column=0, columnspan=7, sticky="nsew")
         self.video_label.bind("<Motion>", self.mouse_move)
         self.video_label.bind("<Button-1>", self.mouse_click)
         self.video_label.bind("<MouseWheel>", self.on_mouse_wheel)
@@ -224,10 +228,18 @@ class VideoApp:
         ttk.Button(self.root, text="SPLIT", command=lambda: self.VFO_action("SPLIT")).grid(row=5, column=3)
         ttk.Button(self.root, text="SUB", command=lambda: self.VFO_action("SUB")).grid(row=5, column=4)
 
-        ttk.Button(self.root, text="Save", command=self.save_settings).grid(row=4, column=6)
+        ttk.Button(self.root, text="Save", command=self.save_settings).grid(row=2, column=6)
         ttk.Button(self.root, text="Exit", command=self.exit_app).grid(row=5, column=6)
 
+        # Allow window to resize widgets
+        for i in range(6):  # Columns 0 to 5
+            self.root.columnconfigure(i, weight=1)
+
+        for i in range(6):  # Rows 0 to 5
+            self.root.rowconfigure(i, weight=1)
+            
         self.update_video()
+        
 
     def on_band_select(self, event):
         selected_band = self.band_dropdown.get()
@@ -307,40 +319,80 @@ class VideoApp:
 
 
     def update_video(self):
-        if not self.cap.isOpened():
-            return
         ret, frame = self.cap.read()
         if ret:
-            cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            self.img = ImageTk.PhotoImage(Image.fromarray(cv2image))
-            self.video_label.config(image=self.img)
-            self.video_label.image = self.img
-        if self.root.winfo_exists():
-            self.root.after(10, self.update_video)
+            # Resize to current label size
+            w = self.video_label.winfo_width()
+            h = self.video_label.winfo_height()
+            if w > 0 and h > 0:
+                frame = cv2.resize(frame, (w, h))
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(frame)
+            imgtk = ImageTk.PhotoImage(image=img)
+            self.video_label.imgtk = imgtk
+            self.video_label.config(image=imgtk)
+        self.root.after(10, self.update_video)
 
+
+##    def mouse_move(self, event):
+##        global frequency, Scale
+##        pos = (event.x - 320)
+##        offset = int((Scale/320) * pos)
+##        newFreq = frequency + offset
+####        self.status_label.config(text=f"Freq: {newFreq:08d}")
+##
+##    def mouse_click(self, event):
+##        global frequency, Scale, whichMarker
+##        pos = (event.x - 320)
+##        offset = int((Scale/320) * pos)
+##        newFreq = frequency + offset
+##        match whichMarker:      ## move marker or VFOA
+##            case "A":
+##                formatted = f"#MFA 000{newFreq:08d};"
+##            case "B":
+##                formatted = f"#MFB 000{newFreq:08d};"
+##            case _:
+##                formatted = f"FA000{newFreq:08d};"
+##        print(formatted)
+##        byte_data = bytearray(formatted.encode("utf-8"))
+##        K3ser.write(byte_data)
+##        K3ser.write(b"FA;")
     def mouse_move(self, event):
         global frequency, Scale
-        pos = (event.x - 320)
-        offset = int((Scale/320) * pos)
+
+        widget_width = self.video_label.winfo_width()
+        center_x = widget_width / 2  # Current center of the widget
+
+        # Scale per pixel (Scale is total width in Hz)
+        scale_per_pixel = Scale / widget_width
+
+        offset = int(scale_per_pixel * (event.x - center_x)) * 2
         newFreq = frequency + offset
-##        self.status_label.config(text=f"Freq: {newFreq:08d}")
+
+        # Optional: Update UI or status bar
+        # self.status_label.config(text=f"Freq: {newFreq:08d}")
 
     def mouse_click(self, event):
         global frequency, Scale, whichMarker
-        pos = (event.x - 320)
-        offset = int((Scale/320) * pos)
+
+        widget_width = self.video_label.winfo_width()
+        center_x = widget_width / 2
+
+        scale_per_pixel = Scale / widget_width
+        offset = int(scale_per_pixel * (event.x - center_x)) * 2
         newFreq = frequency + offset
-        match whichMarker:      ## move marker or VFOA
-            case "A":
-                formatted = f"#MFA 000{newFreq:08d};"
-            case "B":
-                formatted = f"#MFB 000{newFreq:08d};"
-            case _:
-                formatted = f"FA000{newFreq:08d};"
+
+        if whichMarker == "A":
+            formatted = f"#MFA 000{newFreq:08d};"
+        elif whichMarker == "B":
+            formatted = f"#MFB 000{newFreq:08d};"
+        else:
+            formatted = f"FA000{newFreq:08d};"
+
         print(formatted)
         byte_data = bytearray(formatted.encode("utf-8"))
         K3ser.write(byte_data)
-        K3ser.write(b"FA;")
+        K3ser.write(b"FA;")  # Trigger display update
 
     def on_mouse_wheel(self, event):
         if event.delta > 0:
@@ -473,6 +525,7 @@ class VideoApp:
         self.cap.release()
         self.root.quit()
         self.root.destroy()
+
 
 if __name__ == "__main__":
     root = ThemedTk(theme="black")
