@@ -1,1 +1,1 @@
-{"video_source": 2, "comm_port": "COM4", "comm_rate": "38400", "stay_on_top": true, "window_x": 953, "window_y": 525, "window_width": 958, "window_height": 493, "mode": "USB", "band": "40 M"}
+{"video_source": 2, "comm_port": "COM4", "comm_rate": "38400", "stay_on_top": true, "window_x": 953, "window_y": 0, "window_width": 958, "window_height": 493, "mode": "LSB", "band": "20 M", "slider_value": -102.79661016949153, "left_slider_value": 49.62711864406779}

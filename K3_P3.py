@@ -10,7 +10,7 @@
 ##    May 6 -- Added Marker and FVO controls
 ##    May 12 -- Added Band amd Mode Drop downs
 ##    May 13 -- Added window scalability
-##
+##    May 14 -- Added CW readout
 
 import cv2
 import tkinter as tk
@@ -24,7 +24,7 @@ import os
 from serial.tools import list_ports
 from ttkthemes import ThemedTk
 
-MY_VERSION = "WR9R V1.0"
+MY_VERSION = "WR9R V1.2"
 MY_POLL_TIME = 500
 CONFIG_FILE = "config.json"
 
@@ -46,7 +46,9 @@ def load_config():
         "window_x": 100,
         "window_y": 100,
         "window_width": W_WIDTH,
-        "window_height": W_HEIGHT
+        "window_height": W_HEIGHT,
+        "slider_value": -117.0,  # default slider position
+        "left_slider_value": 60.0
     }
 
 def save_config(config):
@@ -78,6 +80,15 @@ def extract_bn_string(k):
 def extract_md_string(k):
     match = re.search(r'MD[^;]*;', k)
     return match.group(0) if match else None
+
+def extract_tb_data(k):
+    match = re.match(r'TB(\d{3})(.*);', k)
+    if match:
+        byte_count = int(match.group(1))
+        data = match.group(2)
+        if len(data) >= byte_count:
+            return data[:byte_count]
+    return None
 
 class VideoApp:
     def __init__(self, root):
@@ -131,10 +142,37 @@ class VideoApp:
 
         self.video_label = tk.Label(self.root, bg='#2e2e2e')
 #        self.video_label.grid(row=0, column=0, columnspan=7)
-        self.video_label.grid(row=0, column=0, columnspan=7, sticky="nsew")
+        self.video_label.grid(row=0, column=1, columnspan=6, sticky="nsew")
         self.video_label.bind("<Motion>", self.mouse_move)
         self.video_label.bind("<Button-1>", self.mouse_click)
         self.video_label.bind("<MouseWheel>", self.on_mouse_wheel)
+
+        self.left_slider = ttk.Scale(
+            self.root,
+            from_=10,
+            to=80,
+            orient='vertical',
+            command=self.on_left_slider_change
+        )
+        self.left_slider.set(config.get("left_slider_value", 60))
+        # Place the left slider in column -1 (or 0 if video starts at 1)
+        self.left_slider.grid(row=0, column=0, rowspan=1, sticky='ns', padx=(10, 10))
+
+        self.slider_var = tk.IntVar(value=0)  # Initial value can be set here
+        # Create a frame to contain the right slider (same size as button)
+        self.slider_frame = tk.Frame(self.root, width=80, bg="#2e2e2e")  # Set bg to black
+        self.slider_frame.grid(row=0, column=7, rowspan=6, sticky='ns', padx=(5, 10))
+
+        self.slider = ttk.Scale(
+            self.root,
+            from_=10,
+            to=-170,
+            orient='vertical',
+            command=self.on_slider_change
+        )
+        self.slider.set(config.get("slider_value", -117.0))
+        self.slider.grid(row=0, column=7, rowspan=1, sticky='ns', padx=(10, 10))
+
 
 ##       # self.status_label = ttk.Label(self.root, text="FREQ: ", anchor="w")
 ##        self.status_label = ttk.Label(self.root, text="Mhz:", anchor="center", justify="center")
@@ -199,7 +237,7 @@ class VideoApp:
         self.mode_dropdown.grid(row=5, column=5)
         self.mode_dropdown.bind("<<ComboboxSelected>>", self.on_mode_select)
         
-        ttk.Label(self.root, text="Video Source:").grid(row=2, column=0)
+        ttk.Label(self.root, text="VID Input:").grid(row=2, column=0)
         self.source_dropdown = ttk.Combobox(self.root, values=sources, textvariable=self.video_source_var, style='TCombobox', width=9)
         self.source_dropdown.grid(row=2, column=1)
 
@@ -211,12 +249,11 @@ class VideoApp:
         self.rate_dropdown = ttk.Combobox(self.root, values=rates, textvariable=self.comm_rate_var, style='TCombobox', width=9)
         self.rate_dropdown.grid(row=2, column=5)
 
-
-        ttk.Button(self.root, text="2K", command=lambda: self.button_action("2K")).grid(row=3, column=1)
-        ttk.Button(self.root, text="10K", command=lambda: self.button_action("10K")).grid(row=3, column=2)
-        ttk.Button(self.root, text="50K", command=lambda: self.button_action("50K")).grid(row=3, column=3)
-        ttk.Button(self.root, text="100K", command=lambda: self.button_action("100K")).grid(row=3, column=4)
-        ttk.Button(self.root, text="200K", command=lambda: self.button_action("200K")).grid(row=3, column=5)
+        ttk.Button(self.root, text="2K", command=lambda: self.button_action("2K")).grid(row=3, column=0)
+        ttk.Button(self.root, text="10K", command=lambda: self.button_action("10K")).grid(row=3, column=1)
+        ttk.Button(self.root, text="50K", command=lambda: self.button_action("50K")).grid(row=3, column=2)
+        ttk.Button(self.root, text="100K", command=lambda: self.button_action("100K")).grid(row=3, column=3)
+        ttk.Button(self.root, text="200K", command=lambda: self.button_action("200K")).grid(row=3, column=4)
 
         ttk.Button(self.root, text="MKR A", command=lambda: self.marker_action("MKR A")).grid(row=4, column=1)
         ttk.Button(self.root, text="MKR B", command=lambda: self.marker_action("MKR B")).grid(row=4, column=2)
@@ -231,15 +268,103 @@ class VideoApp:
         ttk.Button(self.root, text="Save", command=self.save_settings).grid(row=2, column=6)
         ttk.Button(self.root, text="Exit", command=self.exit_app).grid(row=5, column=6)
 
+        # Spacer label to force extra space to the right of the buttons
+        spacer = tk.Label(self.root, text="", width=2, bg='#2e2e2e')
+        spacer.grid(row=3, column=7, rowspan=3)
+        self.root.columnconfigure(7, weight=1)
+
+##        self.status_buffer = ""  # Store the string content
+##
+##        self.status_label = tk.Label(
+##            self.root,
+##            text="",
+##            bg="#1e1e1e",
+##            fg="white",
+##            font=("Courier", 14),
+##            anchor="w",        # Left-aligned text
+##            justify="left"
+##        )
+##        self.status_label.grid(row=6, column=0, columnspan=6, sticky="nsew")
+##
+##        self.clear_button = ttk.Button(self.root, text="Clear", command=self.clear_status_label)
+##        self.clear_button.grid(row=6, column=6, sticky="e")
+##
+##        # --- CW Text Box and Send Button at Bottom ---
+##
+###        self.cw_entry = ttk.Entry(self.root, font=("Consolas", 12), width=25)
+##        self.cw_entry = tk.Entry(
+##            self.root,
+##            font=("Courier", 14),
+##            width=25,
+##            bg="black",
+##            fg="white",
+##            insertbackground="white"  # Makes the cursor visible
+##        )
+##        self.cw_entry.grid(row=7, column=0, columnspan=5, sticky="we", padx=5, pady=10)
+##
+##        self.send_button = ttk.Button(self.root, text="Send CW", command=self.send_cw_message)
+##        self.send_button.grid(row=7, column=5, sticky="e", padx=5, pady=10)
+##        # Allow window to resize widgets
+##        for i in range(7):  # Columns 0 to 5
+##            self.root.columnconfigure(i, weight=1)
+##
+##        for i in range(8):  # Rows 0 to 5
+##            self.root.rowconfigure(i, weight=1)
+##  
         # Allow window to resize widgets
-        for i in range(6):  # Columns 0 to 5
+        for i in range(7):  # Columns 0 to 5
             self.root.columnconfigure(i, weight=1)
 
-        for i in range(6):  # Rows 0 to 5
+        for i in range(5):  # Rows 0 to 5
             self.root.rowconfigure(i, weight=1)
             
         self.update_video()
+
+##    def send_cw_message(self):
+##        message = self.cw_entry.get().strip()
+##        if message:
+##            formatted = f"KYW{message};"
+##            print(f"Sending CW: {formatted}")
+##            try:
+##                K3ser.write(bytearray(formatted.encode("utf-8")))
+##            except Exception as e:
+##                print(f"Error sending CW: {e}")
+##        
+##    def append_status_text(self, new_data):
+##        self.status_buffer += new_data
+##
+##        # Estimate number of characters that fit
+##        char_width = 12  # Adjust based on actual font size
+##        widget_width = self.status_label.winfo_width()
+##        max_chars = widget_width // char_width if widget_width > 0 else 80
+##
+##        # Trim buffer from the front if needed
+##        if len(self.status_buffer) > max_chars:
+##            self.status_buffer = self.status_buffer[-max_chars:]
+##
+##        self.status_label.config(text=self.status_buffer)
+##
+##    def clear_status_label(self):
+##        self.status_buffer = ""
+##        self.status_label.config(text="")
+
+    def on_left_slider_change(self, val):
+        value = int(float(val))
+        print(f"L_Slider: {value}")
+        formatted = f"#SCL{value:03d};"
+        print(formatted)
+        byte_data = bytearray(formatted.encode("utf-8"))
+        K3ser.write(byte_data)
+        # Add logic here to use the value
         
+    def on_slider_change(self, val):
+        value = int(float(val))
+        print(f"R_Slider: {value}")
+        formatted = f"#REF{value:03d};"
+        print(formatted)
+        byte_data = bytearray(formatted.encode("utf-8"))
+        K3ser.write(byte_data)
+        # Add logic here to use the value
 
     def on_band_select(self, event):
         selected_band = self.band_dropdown.get()
@@ -306,6 +431,8 @@ class VideoApp:
         config['stay_on_top'] = self.stay_on_top_var.get()
         config['mode'] = self.mode_var.get()
         config["band"] = self.band_var.get()
+        config["slider_value"] = self.slider.get()
+        config["left_slider_value"] = self.left_slider.get()
 
         save_config(config)
 
@@ -333,30 +460,6 @@ class VideoApp:
             self.video_label.config(image=imgtk)
         self.root.after(10, self.update_video)
 
-
-##    def mouse_move(self, event):
-##        global frequency, Scale
-##        pos = (event.x - 320)
-##        offset = int((Scale/320) * pos)
-##        newFreq = frequency + offset
-####        self.status_label.config(text=f"Freq: {newFreq:08d}")
-##
-##    def mouse_click(self, event):
-##        global frequency, Scale, whichMarker
-##        pos = (event.x - 320)
-##        offset = int((Scale/320) * pos)
-##        newFreq = frequency + offset
-##        match whichMarker:      ## move marker or VFOA
-##            case "A":
-##                formatted = f"#MFA 000{newFreq:08d};"
-##            case "B":
-##                formatted = f"#MFB 000{newFreq:08d};"
-##            case _:
-##                formatted = f"FA000{newFreq:08d};"
-##        print(formatted)
-##        byte_data = bytearray(formatted.encode("utf-8"))
-##        K3ser.write(byte_data)
-##        K3ser.write(b"FA;")
     def mouse_move(self, event):
         global frequency, Scale
 
@@ -480,22 +583,37 @@ class VideoApp:
             result = extract_fa_string(s)
             if result:
                 number_str = result[5:-1]
-                frequency = int(number_str)
-                print("FREQ:", frequency)
+                try:
+                    frequency = int(number_str)
+                    print("FREQ:", frequency)
+                except ValueError:
+                   print(f"Ignored bad Freq: '{number_str}'")
             else:
                 result = extract_bn_string(s)       # detect and set dropdowns
                 if result:
                     number_str = result[2:-1]
-                    bandid = int(number_str)
-                    print("BAND:", bandid)
-                    self.set_band_by_id(bandid)
+                    try:
+                        bandid = int(number_str)
+                        print("BAND:", bandid)
+                        self.set_band_by_id(bandid)
+                    except ValueError:
+                       print(f"Ignored bad band data: '{number_str}'")
                 else:
                     result = extract_md_string(s)
                     if result:
                         number_str = result[2:-1]
-                        mode_id = int(number_str)
-                        print("MODE:", mode_id)
-                        self.set_mode_by_id(mode_id)                    
+                        try:
+                            mode_id = int(number_str)
+                            self.set_mode_by_id(mode_id)
+                            print("MODE:", mode_id)
+                            self.set_mode_by_id(mode_id)           
+                        except ValueError:
+                            print(f"Ignored bad mode data: '{number_str}'")
+##                    else:
+##                        result = extract_tb_data(s)
+##                        if result:
+##                            print("CWT:", result)
+##                            self.append_status_text(result)                        
             K3ser.flush()
         else:
             checker = checker + 1
@@ -503,7 +621,11 @@ class VideoApp:
                 K3ser.write(b"BN;")     ## get freq often, but check band and mode for changes too..
                 print("Sent: BN;")
             else:
-                if checker > 5:
+##                if checker == 4 or checker == 2:
+##                    K3ser.write(b"TB;")     ## get freq often, but check band and mode for changes too..
+##                    print("Sent: TB;")
+##                else:
+                if checker >= 5:
                     K3ser.write(b"MD;")
                     print("Sent: MD;")
                     checker = 0
@@ -521,7 +643,9 @@ class VideoApp:
         config['window_y'] = self.root.winfo_y()
         config['window_width'] = self.root.winfo_width()
         config['window_height'] = self.root.winfo_height()
-        save_config(config)     
+        config["slider_value"] = self.slider.get()
+        config["left_slider_value"] = self.left_slider.get()
+        save_config(config)
         self.cap.release()
         self.root.quit()
         self.root.destroy()
