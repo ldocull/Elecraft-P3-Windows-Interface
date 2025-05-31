@@ -13,6 +13,7 @@
 ##    May 14 -- Added CW readout
 ##    May 22 -- Added REF and Scale adjusters
 ##    May 24 -- changed cursor when in the window for better picking
+##    Jun 2 -- improved poll loop format and slider (scale/ref) connection with P3
 
 import cv2
 import tkinter as tk
@@ -26,7 +27,7 @@ import os
 from serial.tools import list_ports
 from ttkthemes import ThemedTk
 
-MY_VERSION = "WR9R V1.4"
+MY_VERSION = "WR9R V1.6"
 MY_POLL_TIME = 500
 CONFIG_FILE = "config.json"
 
@@ -34,6 +35,8 @@ frequency = 0
 checker = 0
 Scale = 50000
 whichMarker = "N"
+L_slider_ready = 0
+R_slider_ready = 0
 
 # Load saved settings
 def load_config():
@@ -69,7 +72,8 @@ K3ser = serial.Serial(MY_K3_COMM_PORT, baudrate=int(MY_COMM_RATE), timeout=0.1)
 K3ser.rts = False
 K3ser.dtr = False
 K3ser.write(b"#SPN001000;")
-
+K3ser.write(b"#SCL;")
+K3ser.write(b"#REF;")
 
 def extract_fa_string(k):
     match = re.search(r'FA0[^;]*;', k)
@@ -292,22 +296,41 @@ class VideoApp:
         self.update_video()
 
     def on_left_slider_change(self, val):   # adjust RF scales
-        value = int(float(val))
-        print(f"L_Slider: {value}")
-        formatted = f"#SCL{value:03d};"
-        print(formatted)
-        byte_data = bytearray(formatted.encode("utf-8"))
-        K3ser.write(byte_data)
-        # Add logic here to use the value
+        global L_slider_ready
+        
+        if L_slider_ready:
+            value = int(float(val))
+            print(f"L_Slider: {value}")
+            formatted = f"#SCL{value:03d};"
+            print(formatted)
+            byte_data = bytearray(formatted.encode("utf-8"))
+            K3ser.write(byte_data)
         
     def on_slider_change(self, val):        # adjust RF offset (REF)
-        value = int(float(val))
-        print(f"R_Slider: {value}")
-        formatted = f"#REF{value:03d};"
-        print(formatted)
-        byte_data = bytearray(formatted.encode("utf-8"))
-        K3ser.write(byte_data)
-        # Add logic here to use the value
+        global R_slider_ready
+        
+        if R_slider_ready:
+            value = int(float(val))
+            print(f"R_Slider: {value}")
+            formatted = f"#REF{value:03d};"
+            print(formatted)
+            byte_data = bytearray(formatted.encode("utf-8"))
+            K3ser.write(byte_data)
+
+    def set_left_slider_value(self, value):
+        """
+        Sets the left_slider (RF scale) value within its defined range (10 to 80).
+        """
+        clamped_value = max(10, min(value, 80))
+        self.left_slider.set(clamped_value)
+
+
+    def set_right_slider_value(self, value):
+        """
+        Sets the right slider (RF reference) value within its defined range (from 10 to -170).
+        """
+        clamped_value = max(-170, min(value, 10))
+        self.slider.set(clamped_value)
 
     def on_band_select(self, event):
         selected_band = self.band_dropdown.get()
@@ -376,7 +399,6 @@ class VideoApp:
         config["band"] = self.band_var.get()
         config["slider_value"] = self.slider.get()
         config["left_slider_value"] = self.left_slider.get()
-
         save_config(config)
 
         self.cap.release()
@@ -521,57 +543,86 @@ class VideoApp:
                 print(f"Unknown marker button: {label}")
 
     def periodic_task(self):
-        global frequency, checker
+        """
+        Polls the K3 for status of Freq, band, mode, pan-ref, and pan-scale
+        Frequency gets sampled more frequently than anything else -- for feel
+        """        
+        global frequency, checker, L_slider_ready, R_slider_ready
+
         if K3ser.in_waiting:
             data = K3ser.read(K3ser.in_waiting)
             s = data.decode("utf-8")
-            result = extract_fa_string(s)
-            if result:
-                number_str = result[5:-1]
-                try:
-                    frequency = int(number_str)
-                    print("FREQ:", frequency)
-                except ValueError:
-                   print(f"Ignored bad Freq: '{number_str}'")
-            else:
-                result = extract_bn_string(s)       # detect and set dropdowns
-                if result:
+
+            match True:
+                case _ if (result := extract_fa_string(s)):
+                    number_str = result[5:-1]
+                    try:
+                        frequency = int(number_str)
+                        print("FREQ:", frequency)
+                    except ValueError:
+                        print(f"Ignored bad Freq: '{number_str}'")
+
+                case _ if (result := extract_bn_string(s)):
                     number_str = result[2:-1]
                     try:
                         bandid = int(number_str)
                         print("BAND:", bandid)
                         self.set_band_by_id(bandid)
                     except ValueError:
-                       print(f"Ignored bad band data: '{number_str}'")
-                else:
-                    result = extract_md_string(s)
-                    if result:
-                        number_str = result[2:-1]
-                        try:
-                            mode_id = int(number_str)
-                            self.set_mode_by_id(mode_id)
-                            print("MODE:", mode_id)
-                            self.set_mode_by_id(mode_id)           
-                        except ValueError:
-                            print(f"Ignored bad mode data: '{number_str}'")
+                        print(f"Ignored bad band data: '{number_str}'")
 
+                case _ if (result := extract_md_string(s)):
+                    number_str = result[2:-1]
+                    try:
+                        mode_id = int(number_str)
+                        self.set_mode_by_id(mode_id)
+                        print("MODE:", mode_id)
+                    except ValueError:
+                        print(f"Ignored bad mode data: '{number_str}'")
+
+                case _ if (result := extract_scl_string(s)):
+                    number_str = result[4:-1]
+                    try:
+                        sclval = int(number_str)
+                        self.set_left_slider_value(sclval)      # Sets left slider safely
+                        print("SCALE:", sclval)
+                        L_slider_ready = 1
+                    except ValueError:
+                        print(f"Ignored bad scale data: '{number_str}'")
+
+                case _ if (result := extract_ref_string(s)):
+                    number_str = result[4:-1]
+                    try:
+                        refval = int(number_str)
+                        self.set_right_slider_value(refval)   # Sets right slider safely
+                        print("REF:", refval)
+                        R_slider_ready = 1
+                    except ValueError:
+                        print(f"Ignored bad ref data: '{number_str}'")
+                        
             K3ser.flush()
         else:
-            checker = checker + 1
-            if checker == 3:
-                K3ser.write(b"BN;")     ## get freq often, but check band and mode for changes too..
-                print("Sent: BN;")
-            else:
-                if checker >= 5:
+            checker += 1
+            match checker:
+                case 2:
+                    K3ser.write(b"#REF;")
+                    print("Sent: ;")
+                case 4:
+                    K3ser.write(b"#SCL;")
+                    print("Sent: #SCL;")
+                case 6:
+                    K3ser.write(b"BN;")
+                    print("Sent: BN;")
+                case 8:
                     K3ser.write(b"MD;")
                     print("Sent: MD;")
                     checker = 0
-                else:
+                case _:
                     K3ser.write(b"FA;")
                     print("Sent: FA;")
-                
             
         self.root.after(MY_POLL_TIME, self.periodic_task)
+
         
     def exit_app(self):
         print("Exiting...")
